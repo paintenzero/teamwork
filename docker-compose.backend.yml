@@ -50,11 +50,12 @@ services:
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -s3 -dir=/data"
+    command: "server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
     ports:
       - "${TS_IP}:8333:8333" # tailnet-only (agents read/write artifacts here)
     volumes:
       - "weed-data:/data"
+      - "./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" # S3 identities; anonymous denied
     restart: unless-stopped
 
   recorder:
