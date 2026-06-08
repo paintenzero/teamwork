@@ -59,7 +59,8 @@ services:
       S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
     depends_on:
       redis: { condition: service_healthy }
-      postgres: { condition: service_healthy }    restart: unless-stopped
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
 
   orchestrator:
     image: *app-image
@@ -106,7 +107,8 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       MAX_RUN_MS: "${MAX_RUN_MS:-0}"
     depends_on:
-      redis: { condition: service_healthy }    restart: unless-stopped
+      redis: { condition: service_healthy }
+    restart: unless-stopped
 
   web:
     image: "${ORCHESTRA_WEB_IMAGE:-paintezero/orchestra-web:latest}"
