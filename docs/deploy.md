@@ -33,13 +33,13 @@ cp .env.prod.example .env
 # edit secrets: GATEWAY_TOKEN, the ORCHESTRA_*/AGENT_* Redis passwords,
 # POSTGRES_PASSWORD, S3 keys, and (optionally) a real model key.
 node scripts/gen-acl.mjs           # regenerate redis/users.acl to match the passwords
-node scripts/gen-s3-config.mjs     # regenerate seaweedfs/s3.json (S3 identities) if you changed S3_ACCESS_KEY/S3_SECRET_KEY
 ```
 
-SeaweedFS S3 runs with identities from `seaweedfs/s3.json`, so signed requests
-(the apps, `mc`, `aws-cli`) authenticate with `S3_ACCESS_KEY`/`S3_SECRET_KEY` and
-**anonymous access is denied**. Change those secrets in `.env`, then re-run
-`gen-s3-config.mjs`.
+Object storage: `docker-compose.prod.yml` bundles SeaweedFS for a self-contained
+trial, while `docker-compose.backend.yml` uses an **external** S3-compatible
+service — set `S3_ENDPOINT` (+ `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) in
+`.env` to point at it (RustFS, MinIO, AWS S3, …). The apps use path-style
+addressing, so any S3-compatible endpoint works.
 
 The defaults in `.env.prod.example` match the committed `redis/users.acl`, so the stack
 runs as-is for a trial — **but change every secret for a real deployment.** The Redis

@@ -45,10 +45,9 @@ services:
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
+    command: "server -s3 -dir=/data"
     volumes:
       - "weed-data:/data"
-      - "./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" # S3 identities; anonymous denied
     restart: unless-stopped
 
   recorder:

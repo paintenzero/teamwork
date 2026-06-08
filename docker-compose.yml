@@ -32,11 +32,9 @@ services:
   # Self-hosted S3: trace archive (Phase 3); artifact exchange (Phase 5).
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
+    command: "server -s3 -dir=/data"
     ports: ["8333:8333", "8888:8888", "9333:9333"]
-    volumes:
-      - "weed-data:/data"
-      - "./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" # S3 identities; anonymous denied
+    volumes: ["weed-data:/data"]
 
   # --- RustFS alternative (Apache-2.0, beta as of mid-2026) -------------------
   # Swap in if you prefer the Rust/Apache story over SeaweedFS. S3 API is the
