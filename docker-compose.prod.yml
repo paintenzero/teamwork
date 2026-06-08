@@ -1,8 +1,10 @@
 # Production deployment for a remote server. Uses the prebuilt multi-arch images
 # (paintezero/orchestra, paintezero/orchestra-web). Only the web port is published;
-# Redis / Postgres / S3 stay on the internal network. Configure via a `.env` file
-# next to this one (copy .env.prod.example). After changing any Redis password,
-# regenerate the ACL: `node scripts/gen-acl.mjs`.
+# Redis / Postgres stay on the internal network. Object storage is external: set
+# S3_ENDPOINT (+ S3_BUCKET / S3_ACCESS_KEY / S3_SECRET_KEY) in .env to an
+# S3-compatible service. Configure via a `.env` file next to this one (copy
+# .env.prod.example). After changing any Redis password, regenerate the ACL:
+# `node scripts/gen-acl.mjs`.
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env pull
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -43,13 +45,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  seaweedfs:
-    image: chrislusf/seaweedfs:latest
-    command: "server -s3 -dir=/data"
-    volumes:
-      - "weed-data:/data"
-    restart: unless-stopped
-
   recorder:
     image: *app-image
     command: ["pnpm", "recorder"]
@@ -58,15 +53,13 @@ services:
       REDIS_USERNAME: "recorder"
       REDIS_PASSWORD: "${ORCHESTRA_REC_PASSWORD}"
       DATABASE_URL: "postgres://${POSTGRES_USER:-orchestra}:${POSTGRES_PASSWORD:-orchestra}@postgres:5432/${POSTGRES_DB:-orchestra}"
-      S3_ENDPOINT: "http://seaweedfs:8333"
+      S3_ENDPOINT: "${S3_ENDPOINT}"
       S3_BUCKET: "${S3_BUCKET:-orchestra}"
       S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
       S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
     depends_on:
       redis: { condition: service_healthy }
-      postgres: { condition: service_healthy }
-      seaweedfs: { condition: service_started }
-    restart: unless-stopped
+      postgres: { condition: service_healthy }    restart: unless-stopped
 
   orchestrator:
     image: *app-image
@@ -77,7 +70,7 @@ services:
       REDIS_USERNAME: "orchestrator"
       REDIS_PASSWORD: "${ORCHESTRA_ORCH_PASSWORD}"
       DATABASE_URL: "postgres://${POSTGRES_USER:-orchestra}:${POSTGRES_PASSWORD:-orchestra}@postgres:5432/${POSTGRES_DB:-orchestra}"
-      S3_ENDPOINT: "http://seaweedfs:8333"
+      S3_ENDPOINT: "${S3_ENDPOINT}"
       S3_BUCKET: "${S3_BUCKET:-orchestra}"
       S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
       S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
@@ -100,7 +93,7 @@ services:
       REDIS_URL: "redis://redis:6379"
       REDIS_USERNAME: "agent-researcher"
       REDIS_PASSWORD: "${AGENT_RESEARCHER_PASSWORD}"
-      S3_ENDPOINT: "http://seaweedfs:8333"
+      S3_ENDPOINT: "${S3_ENDPOINT}"
       S3_BUCKET: "${S3_BUCKET:-orchestra}"
       S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
       S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
@@ -113,9 +106,7 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       MAX_RUN_MS: "${MAX_RUN_MS:-0}"
     depends_on:
-      redis: { condition: service_healthy }
-      seaweedfs: { condition: service_started }
-    restart: unless-stopped
+      redis: { condition: service_healthy }    restart: unless-stopped
 
   web:
     image: "${ORCHESTRA_WEB_IMAGE:-paintezero/orchestra-web:latest}"
@@ -131,4 +122,3 @@ services:
 volumes:
   redis-data: {}
   pg-data: {}
-  weed-data: {}

@@ -60,7 +60,7 @@ This is **not a git repository.**
 
     pnpm install
     pnpm build          # pnpm -r build: type-checks every package + app, vite-builds web
-    pnpm infra:up       # docker compose up -d: Redis, Postgres, SeaweedFS
+    pnpm infra:up       # docker compose up -d: Redis, Postgres (S3 is external — see docker-compose.yml)
     pnpm infra:down
     pnpm smoke          # tsx examples/ping-pong.ts — the end-to-end bus test
     pnpm agent          # start the agent  (faux model unless ANTHROPIC_API_KEY is set)

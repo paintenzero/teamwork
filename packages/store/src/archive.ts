@@ -15,12 +15,12 @@ interface S3Opts {
   region?: string;
 }
 
-/** An S3 client pointed at the env-configured endpoint (SeaweedFS in dev). */
+/** An S3 client pointed at the env-configured endpoint (any S3-compatible store). */
 function makeS3Client(opts: S3Opts): S3Client {
   return new S3Client({
     endpoint: opts.endpoint ?? process.env.S3_ENDPOINT ?? "http://localhost:8333",
     region: opts.region ?? process.env.S3_REGION ?? "us-east-1",
-    forcePathStyle: true, // SeaweedFS / MinIO want path-style addressing
+    forcePathStyle: true, // RustFS / MinIO / most S3-compatible stores want path-style
     credentials: {
       accessKeyId: opts.accessKeyId ?? process.env.S3_ACCESS_KEY ?? "orchestra",
       secretAccessKey: opts.secretAccessKey ?? process.env.S3_SECRET_KEY ?? "orchestra",
@@ -46,7 +46,7 @@ function parseS3Uri(uri: string): { bucket: string; key: string } {
 }
 
 /**
- * Full raw traces archived to S3 (SeaweedFS in dev) as JSONL — one envelope per
+ * Full raw traces archived to S3 as JSONL — one envelope per
  * line. Postgres keeps a `trace_uri` pointer. The bucket/key layout is stable
  * (`traces/<sessionId>.jsonl`) so re-archiving a growing session just overwrites.
  */

@@ -9,9 +9,9 @@ under the **paintezero** org:
   `/api` (+ WebSockets) and the health endpoints to the orchestrator, and **injects the
   gateway bearer token server-side**, so the real token never ships in the browser.
 
-`docker-compose.prod.yml` wires these together with Redis (ACL-protected), Postgres,
-and SeaweedFS (S3). Only the web port is published; everything else stays on the
-internal network.
+`docker-compose.prod.yml` wires these together with Redis (ACL-protected) and
+Postgres; object storage is an external S3-compatible service (set `S3_ENDPOINT`).
+Only the web port is published; everything else stays on the internal network.
 
 ## Build & push the images (multi-arch)
 

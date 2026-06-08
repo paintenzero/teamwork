@@ -50,7 +50,7 @@ built output — so **`pnpm build` must run before `pnpm smoke`.**
     cp .env.example .env   # optional — sensible dev defaults are baked in
     pnpm install
     pnpm build
-    pnpm infra:up      # starts Redis (ACL-protected), Postgres, SeaweedFS
+    pnpm infra:up      # starts Redis (ACL-protected) + Postgres (S3 is external — see docker-compose.yml)
     pnpm smoke         # runs examples/ping-pong.ts against Redis
     pnpm infra:down    # stop the stack when done
 
