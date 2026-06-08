@@ -30,7 +30,6 @@ export function App() {
   const [selected, setSelected] = useState<string | undefined>();
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
-  const [historic, setHistoric] = useState(false); // viewing a past session (read-only)
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [tree, setTree] = useState<SessionSummary[]>([]); // delegation tree of the open session
   const [input, setInput] = useState("");
@@ -95,7 +94,6 @@ export function App() {
   function openSession(sid: string) {
     sessionSock.current?.close();
     setEvents([]);
-    setHistoric(false);
     setSessionId(sid);
     location.hash = `session=${sid}`;
     const connect = () => {
@@ -114,29 +112,46 @@ export function App() {
     connect();
   }
 
-  // Open a PAST session read-only from the durable transcript (S3 / Redis).
-  async function openHistory(sid: string) {
+  // Resume a PAST session: seed the transcript from the durable archive (S3 /
+  // Redis — survives a Redis flush), then tail new events live and let the user
+  // keep talking. The agent rehydrates that task's working memory from its Redis
+  // snapshot, so the conversation continues where it left off. Tailing from "now"
+  // (the transcript is already seeded) avoids re-rendering the replay twice. On a
+  // drop we re-seed + re-tail, so the rebuilt transcript stays correct.
+  function openPast(sid: string) {
     sessionSock.current?.close();
-    sessionSock.current = null;
-    const res = await api(`/api/sessions/${sid}/transcript`);
-    const { events: evs } = (await res.json()) as { events: ObservabilityEvent[] };
-    setEvents(evs);
-    setHistoric(true);
+    setEvents([]);
     setSessionId(sid);
-    location.hash = `session=${sid}&view=history`;
+    location.hash = `session=${sid}&resume=1`;
+    const connect = async () => {
+      const res = await api(`/api/sessions/${sid}/transcript`);
+      const { events: seed } = (await res.json()) as { events: ObservabilityEvent[] };
+      const acc = [...seed];
+      setEvents([...acc]);
+      const ws = new WebSocket(wsUrl(`/api/sessions/${sid}/stream?from=now`));
+      ws.onmessage = (m) => {
+        acc.push(JSON.parse(m.data) as ObservabilityEvent);
+        setEvents([...acc]);
+      };
+      ws.onclose = () => {
+        if (sessionSock.current === ws) setTimeout(() => void connect(), 1000);
+      };
+      sessionSock.current = ws;
+    };
+    void connect();
   }
 
   // On load, reconnect to a session named in the URL hash (refresh → replay).
   useEffect(() => {
     const m = location.hash.match(/session=([^&]+)/);
     if (!m) return;
-    if (/view=history/.test(location.hash)) void openHistory(m[1]);
+    if (/resume=1/.test(location.hash)) openPast(m[1]);
     else openSession(m[1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { entries, status } = useMemo(() => foldEvents(events), [events]);
-  const running = !historic && status?.status === "busy";
+  const running = status?.status === "busy";
   const selectedAgent = agents.find((a) => a.id === selected);
 
   // Delegation tree of the open session — refetched when a run settles (a child
@@ -166,7 +181,7 @@ export function App() {
   // it. The agent decides prompt-vs-steer; here we only route.
   async function send() {
     const text = input.trim();
-    if (!text || historic) return;
+    if (!text) return;
     setInput("");
     if (!sessionId) {
       if (!selected) return;
@@ -197,7 +212,6 @@ export function App() {
     sessionSock.current?.close();
     sessionSock.current = null;
     setEvents([]);
-    setHistoric(false);
     setSessionId(undefined);
     location.hash = "";
   }
@@ -248,7 +262,7 @@ export function App() {
             <button
               key={s.id}
               className={`session-item ${sessionId === s.id ? "sel" : ""}`}
-              onClick={() => void openHistory(s.id)}
+              onClick={() => openPast(s.id)}
             >
               <span className={`dot ${s.status === "open" ? "idle" : "offline"}`} />
               <span className="sid-short">{s.id.slice(0, 8)}…</span>
@@ -259,12 +273,12 @@ export function App() {
 
         <main className="run">
           <div className="topbar">
-            <button className="newchat" onClick={newChat} disabled={!sessionId && !historic}>
+            <button className="newchat" onClick={newChat} disabled={!sessionId}>
               <Icon name="add" className="sm" /> New chat
             </button>
             {selected && <span className="with mono-ui">chatting with {selected}</span>}
             <span className="spacer" />
-            {!historic && status && (
+            {status && (
               <span className={`status ${status.status}`}>
                 <span className={`dot ${status.status}`} /> {status.status}
               </span>
@@ -281,12 +295,6 @@ export function App() {
             ))}
           </div>
 
-          {historic && (
-            <div className="banner">
-              Viewing a past session (read-only). Start a <strong>New chat</strong> to talk.
-            </div>
-          )}
-
           <form
             className="composer"
             onSubmit={(e) => {
@@ -301,15 +309,13 @@ export function App() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={
-                    historic
-                      ? "read-only — New chat to talk"
-                      : !selected
-                        ? "no agent selected"
-                        : running
-                          ? "Steer the agent…"
-                          : "Send a command to the agent…"
+                    !selected
+                      ? "no agent selected"
+                      : running
+                        ? "Steer the agent…"
+                        : "Send a command to the agent…"
                   }
-                  disabled={!selected || historic}
+                  disabled={!selected}
                 />
               </div>
               <div className="composer-row">
@@ -320,7 +326,7 @@ export function App() {
                       <button
                         type="submit"
                         className="btn steer"
-                        disabled={!selected || historic || !input.trim()}
+                        disabled={!selected || !input.trim()}
                       >
                         <Icon name="navigation" className="sm" /> Steer
                       </button>
@@ -332,7 +338,7 @@ export function App() {
                     <button
                       type="submit"
                       className="btn send"
-                      disabled={!selected || historic || !input.trim()}
+                      disabled={!selected || !input.trim()}
                     >
                       <Icon name="send" className="sm" /> Send
                     </button>
@@ -358,7 +364,7 @@ export function App() {
                 <div>
                   <h2>{selectedAgent.id}</h2>
                   <p className="sub">
-                    Status: {!historic && status ? status.status : selectedAgent.status}
+                    Status: {status ? status.status : selectedAgent.status}
                   </p>
                 </div>
               </section>
@@ -407,7 +413,7 @@ export function App() {
                         rootId={sessionId}
                         all={tree}
                         current={sessionId}
-                        onOpen={openHistory}
+                        onOpen={openPast}
                       />
                     </div>
                   </div>

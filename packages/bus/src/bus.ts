@@ -32,7 +32,7 @@ const DEDUPE_TTL_MS = Number(process.env.DEDUPE_TTL_MS ?? 86_400_000); // 24h id
 const RECLAIM_IDLE_MS = Number(process.env.RECLAIM_IDLE_MS ?? 30_000); // reclaim pending idle this long
 const RECLAIM_EVERY_MS = Number(process.env.RECLAIM_EVERY_MS ?? 10_000); // how often to sweep for stuck requests
 const MAX_DELIVERIES = Number(process.env.MAX_DELIVERIES ?? 5); // attempts before dead-lettering
-const TASK_CONTEXT_TTL_MS = Number(process.env.TASK_CONTEXT_TTL_MS ?? 7 * 86_400_000); // task snapshot retention
+const TASK_CONTEXT_TTL_MS = Number(process.env.TASK_CONTEXT_TTL_MS ?? 30 * 86_400_000); // task snapshot retention (resume window)
 
 // ioredis returns XREAD/XREADGROUP results as [stream, [[id, [f, v, ...]], ...]][]
 type StreamReply = Array<[string, Array<[string, string[]]>]>;

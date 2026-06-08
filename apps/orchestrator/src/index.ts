@@ -275,12 +275,16 @@ app.post("/api/runs", (req, reply) => {
 
 app.get("/api/sessions/:sessionId/stream", { websocket: true }, (socket, req) => {
   const { sessionId } = req.params as { sessionId: string };
+  // `from=now` tails only new events — used when resuming a past session whose
+  // transcript the UI has already seeded from the durable archive (so the replay
+  // isn't duplicated). Default `start` replays the whole stream then tails.
+  const { from } = req.query as { from?: string };
   const stop = bus.subscribeEvents(
     sessionId,
     (ev) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(ev));
     },
-    { from: "start" },
+    { from: from === "now" ? "now" : "start" },
   );
   socket.on("close", stop);
 });

@@ -335,13 +335,12 @@ body {
 .tool-result.err { color: var(--error); }
 
 /* Banners / hints. */
-.banner, .hint {
+.hint {
   margin: 0 24px 16px;
   padding: 8px 12px;
   border: 1px solid var(--outline-variant);
   font-size: 12px;
 }
-.banner { background: var(--surface-container-low); color: var(--on-surface-variant); }
 .hint { background: rgba(254, 201, 49, 0.08); border-color: rgba(254, 201, 49, 0.3); color: var(--tertiary-container); }
 
 /* ---- Composer ------------------------------------------------------------ */
