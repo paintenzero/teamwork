@@ -1,0 +1,112 @@
+# Backend-only deployment: the bus + persistence + UI bridge that native agents on
+# other machines connect to over Tailscale. No agent runs here — agents are external
+# (point them at redis://<TS_IP>:6379 + http://<TS_IP>:8333 with their ACL creds).
+#
+# Redis (6379), S3 (8333) and the web UI are bound to the Tailscale IP (${TS_IP}),
+# so nothing is on the public internet — only the tailnet can reach them. Postgres
+# stays fully internal (only the recorder/orchestrator touch it).
+#
+#   docker compose -f docker-compose.backend.yml --env-file .env up -d
+#
+# Images are built locally on the host (this VPS is ARM): see the deploy steps —
+#   docker build -t paintezero/orchestra:latest     -f Dockerfile .
+#   docker build -t paintezero/orchestra-web:latest -f apps/web/Dockerfile .
+
+name: orchestra
+
+x-app-image: &app-image "${ORCHESTRA_IMAGE:-paintezero/orchestra:latest}"
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--aclfile", "/etc/redis/users.acl"]
+    volumes:
+      - "redis-data:/data"
+      - "./redis/users.acl:/etc/redis/users.acl:ro"
+    ports:
+      - "${TS_IP}:${REDIS_HOST_PORT:-6379}:6379" # tailnet-only (agents connect here)
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${ORCHESTRA_ADMIN_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-orchestra}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-orchestra}"
+      POSTGRES_DB: "${POSTGRES_DB:-orchestra}"
+    volumes:
+      - "pg-data:/var/lib/postgresql/data"
+      - "./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orchestra}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -s3 -dir=/data"
+    ports:
+      - "${TS_IP}:8333:8333" # tailnet-only (agents read/write artifacts here)
+    volumes:
+      - "weed-data:/data"
+    restart: unless-stopped
+
+  recorder:
+    image: *app-image
+    command: ["pnpm", "recorder"]
+    environment:
+      REDIS_URL: "redis://redis:6379"
+      REDIS_USERNAME: "recorder"
+      REDIS_PASSWORD: "${ORCHESTRA_REC_PASSWORD}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-orchestra}:${POSTGRES_PASSWORD:-orchestra}@postgres:5432/${POSTGRES_DB:-orchestra}"
+      S3_ENDPOINT: "http://seaweedfs:8333"
+      S3_BUCKET: "${S3_BUCKET:-orchestra}"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      seaweedfs: { condition: service_started }
+    restart: unless-stopped
+
+  orchestrator:
+    image: *app-image
+    command: ["pnpm", "orchestrator"]
+    environment:
+      PORT: "3001"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_USERNAME: "orchestrator"
+      REDIS_PASSWORD: "${ORCHESTRA_ORCH_PASSWORD}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-orchestra}:${POSTGRES_PASSWORD:-orchestra}@postgres:5432/${POSTGRES_DB:-orchestra}"
+      S3_ENDPOINT: "http://seaweedfs:8333"
+      S3_BUCKET: "${S3_BUCKET:-orchestra}"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
+      GATEWAY_TOKEN: "${GATEWAY_TOKEN}"
+      GATEWAY_RATE_LIMIT_RPS: "${GATEWAY_RATE_LIMIT_RPS:-50}"
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    image: "${ORCHESTRA_WEB_IMAGE:-paintezero/orchestra-web:latest}"
+    environment:
+      ORCHESTRATOR_UPSTREAM: "http://orchestrator:3001"
+      GATEWAY_TOKEN: "${GATEWAY_TOKEN}"
+    ports:
+      - "${TS_IP}:${WEB_PORT:-80}:80" # tailnet-only UI; expose publicly behind HTTPS if desired
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+volumes:
+  redis-data: {}
+  pg-data: {}
+  weed-data: {}

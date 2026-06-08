@@ -1,0 +1,10 @@
+user default on >orchestra-admin ~* &* +@all
+user dev on >orchestra-dev ~* &* +@all -@dangerous
+user orchestrator on >orchestra-orch ~* &* +@all -@dangerous
+user recorder on >orchestra-rec ~* &* +@all -@dangerous
+user agent-researcher on >agent-researcher-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-researcher %R~cstream:agent-researcher ~cpos:agent-researcher ~dedup:agent-researcher:* ~taskctx:agent-researcher:* ~obs:* ~req:* ~reply:*
+user agent-writer on >agent-writer-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-writer %R~cstream:agent-writer ~cpos:agent-writer ~dedup:agent-writer:* ~taskctx:agent-writer:* ~obs:* ~req:* ~reply:*
+user agent-producer on >agent-producer-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-producer %R~cstream:agent-producer ~cpos:agent-producer ~dedup:agent-producer:* ~taskctx:agent-producer:* ~obs:* ~req:* ~reply:*
+user agent-reader on >agent-reader-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-reader %R~cstream:agent-reader ~cpos:agent-reader ~dedup:agent-reader:* ~taskctx:agent-reader:* ~obs:* ~req:* ~reply:*
+user agent-echo on >agent-echo-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-echo %R~cstream:agent-echo ~cpos:agent-echo ~dedup:agent-echo:* ~taskctx:agent-echo:* ~obs:* ~req:* ~reply:*
+user agent-human on >agent-human-pass +@all -@dangerous -@admin resetchannels &presence:events &sessions:events %R~presence:agent:* %RW~presence:agent:agent-human %R~cstream:agent-human ~cpos:agent-human ~dedup:agent-human:* ~taskctx:agent-human:* ~obs:* ~req:* ~reply:*

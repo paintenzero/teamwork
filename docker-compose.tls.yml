@@ -1,0 +1,44 @@
+# TLS-only Redis override (Phase 6, WS1). Layer on top of the base compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d redis
+#
+# Plaintext is disabled (`--port 0`), so Redis refuses non-TLS connections; the ACL
+# file still applies, so it also refuses no-auth. Clients connect with rediss:// (or
+# REDIS_TLS=1) and REDIS_TLS_CA=redis/tls/ca.crt. `tls-auth-clients no` keeps it
+# server-authenticated only (no mutual TLS) to match the Bus's client config.
+# Dev certs live in redis/tls/ — regenerate them for any real deployment.
+services:
+  redis:
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--aclfile"
+      - "/etc/redis/users.acl"
+      - "--port"
+      - "0"
+      - "--tls-port"
+      - "6379"
+      - "--tls-cert-file"
+      - "/etc/redis/tls/redis.crt"
+      - "--tls-key-file"
+      - "/etc/redis/tls/redis.key"
+      - "--tls-ca-cert-file"
+      - "/etc/redis/tls/ca.crt"
+      - "--tls-auth-clients"
+      - "no"
+    volumes:
+      - "redis-data:/data"
+      - "./redis/users.acl:/etc/redis/users.acl"
+      - "./redis/tls:/etc/redis/tls"
+    healthcheck:
+      test:
+        - "CMD"
+        - "redis-cli"
+        - "--no-auth-warning"
+        - "-a"
+        - "orchestra-admin"
+        - "--tls"
+        - "--cacert"
+        - "/etc/redis/tls/ca.crt"
+        - "ping"

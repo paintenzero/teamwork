@@ -1,0 +1,14 @@
+# Keep build context small and never ship local/dev artifacts into images.
+**/node_modules
+**/dist
+.git
+.gitignore
+*.log
+.env
+.env.*
+!.env.prod.example
+redis/tls
+docs
+plans
+examples
+**/*.Zone.Identifier

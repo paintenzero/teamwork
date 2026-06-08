@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+!.env.prod.example
+*.tsbuildinfo
+redis/tls/
+.claude/settings.local.json
+*:Zone.Identifier

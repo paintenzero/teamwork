@@ -1,0 +1,28 @@
+{
+  "name": "orchestra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "smoke": "tsx examples/ping-pong.ts",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "agent": "pnpm --filter @orchestra/agent start",
+    "orchestrator": "pnpm --filter @orchestra/orchestrator start",
+    "recorder": "pnpm --filter @orchestra/recorder start",
+    "web": "pnpm --filter @orchestra/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@paintenzero/orchestra-bus": "workspace:^",
+    "@paintenzero/orchestra-protocol": "workspace:^"
+  }
+}

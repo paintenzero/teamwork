@@ -1,0 +1,21 @@
+{
+  "name": "@orchestra/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@paintenzero/orchestra-bus": "workspace:^",
+    "@paintenzero/orchestra-protocol": "workspace:^",
+    "@paintenzero/orchestra-store": "workspace:^",
+    "@earendil-works/pi-agent-core": "^0.78.1",
+    "@earendil-works/pi-ai": "^0.78.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

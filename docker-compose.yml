@@ -1,0 +1,54 @@
+services:
+  redis:
+    image: redis:7-alpine
+    # Phase 6: ACL users from a mounted file; no-auth connections are refused.
+    command: ["redis-server", "--appendonly", "yes", "--aclfile", "/etc/redis/users.acl"]
+    ports: ["6379:6379"]
+    volumes:
+      - "redis-data:/data"
+      - "./redis/users.acl:/etc/redis/users.acl"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "orchestra-admin", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orchestra
+      POSTGRES_PASSWORD: orchestra
+      POSTGRES_DB: orchestra
+    ports: ["5432:5432"]
+    volumes:
+      - "pg-data:/var/lib/postgresql/data"
+      - "./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestra"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Self-hosted S3: trace archive (Phase 3); artifact exchange (Phase 5).
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -s3 -dir=/data"
+    ports: ["8333:8333", "8888:8888", "9333:9333"]
+    volumes: ["weed-data:/data"]
+
+  # --- RustFS alternative (Apache-2.0, beta as of mid-2026) -------------------
+  # Swap in if you prefer the Rust/Apache story over SeaweedFS. S3 API is the
+  # contract, so nothing else changes. Point S3_ENDPOINT at http://localhost:9000.
+  # rustfs:
+  #   image: rustfs/rustfs:latest
+  #   environment:
+  #     RUSTFS_ACCESS_KEY: orchestra
+  #     RUSTFS_SECRET_KEY: orchestra-secret
+  #   ports: ["9000:9000"]
+  #   volumes: ["rustfs-data:/data"]
+
+volumes:
+  redis-data: {}
+  pg-data: {}
+  weed-data: {}
+  # rustfs-data: {}
