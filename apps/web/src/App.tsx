@@ -37,6 +37,7 @@ export function App() {
   const [connected, setConnected] = useState(false); // presence socket up → footer link health
   const sessionSock = useRef<WebSocket | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
+  const pinnedRef = useRef(true); // is the user scrolled to the bottom? → follow new content
 
   // Roster: seed from GET, keep live via the presence socket.
   useEffect(() => {
@@ -168,15 +169,24 @@ export function App() {
       .catch(() => {});
   }, [sessionId, status?.status]);
 
-  // Follow the latest turn as the transcript grows — but only when the user is
-  // already pinned near the bottom. Otherwise leave their scroll position alone,
-  // so they can read back through a long session without being yanked down.
-  useEffect(() => {
+  // Record whether the user is pinned to the bottom on their own scrolls, so the
+  // follow effect below can read it *before* new content shifts the geometry.
+  function onTraceScroll() {
     const el = traceRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [entries.length]);
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
+
+  // Follow new content as it arrives — new turns AND streaming deltas within the
+  // agent's current message — but only while the user is pinned to the bottom.
+  // Otherwise leave their scroll position alone so they can read back through a
+  // long session without being yanked down. `events` changes on every delta, so
+  // this keeps up with streaming, not just whole new turns.
+  useEffect(() => {
+    if (!pinnedRef.current) return;
+    const el = traceRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events]);
 
   // One input, two gestures: the first message opens a session, the rest continue
   // it. The agent decides prompt-vs-steer; here we only route.
@@ -306,7 +316,7 @@ export function App() {
             {sessionId && <span className="sid">session {sessionId.slice(0, 8)}…</span>}
           </div>
 
-          <div className="trace" ref={traceRef}>
+          <div className="trace" ref={traceRef} onScroll={onTraceScroll}>
             {entries.length === 0 && (
               <p className="muted">No messages yet — pick an agent and say hello below.</p>
             )}
