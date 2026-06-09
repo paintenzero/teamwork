@@ -1,15 +1,16 @@
-# Production deployment for a remote server. Uses the prebuilt multi-arch images
-# (paintezero/orchestra, paintezero/orchestra-web). Only the web port is published;
-# Redis / Postgres stay on the internal network. Object storage is external: set
-# S3_ENDPOINT (+ S3_BUCKET / S3_ACCESS_KEY / S3_SECRET_KEY) in .env to an
-# S3-compatible service. Configure via a `.env` file next to this one (copy
-# .env.prod.example). After changing any Redis password, regenerate the ACL:
-# `node scripts/gen-acl.mjs`.
+# Production deployment for the Tailscale-connected VPS. Redis and the web UI bind
+# to the Tailscale IP (${TS_IP}) so external agents on the tailnet can reach the bus
+# and nothing is on the public internet; Postgres stays fully internal. No agent runs
+# here — agents are external and connect to redis://${TS_IP}:${REDIS_HOST_PORT} with
+# their ACL creds. Object storage is external: set S3_ENDPOINT (+ S3_BUCKET /
+# S3_ACCESS_KEY / S3_SECRET_KEY) in .env to an S3-compatible service. Configure via a
+# `.env` file next to this one (copy .env.prod.example). After changing any Redis
+# password, regenerate the ACL: `node scripts/gen-acl.mjs`.
 #
-#   docker compose -f docker-compose.prod.yml --env-file .env pull
+# Images are built locally on the host (this VPS is ARM; no registry):
+#   docker build -t paintezero/orchestra:latest     -f Dockerfile .
+#   docker build -t paintezero/orchestra-web:latest -f apps/web/Dockerfile .
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
-#
-# Build/push the images first (multi-arch): ./scripts/build-images.sh
 
 name: orchestra
 
@@ -22,6 +23,8 @@ services:
     volumes:
       - "redis-data:/data"
       - "./redis/users.acl:/etc/redis/users.acl:ro"
+    ports:
+      - "${TS_IP}:${REDIS_HOST_PORT:-6379}:6379" # tailnet-only (external agents connect here)
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${ORCHESTRA_ADMIN_PASSWORD}", "ping"]
       interval: 5s
@@ -82,41 +85,13 @@ services:
       postgres: { condition: service_healthy }
     restart: unless-stopped
 
-  # One agent. Copy this block (distinct AGENT_ID + its own ACL user) to add more.
-  agent-researcher:
-    image: *app-image
-    command: ["pnpm", "agent"]
-    environment:
-      AGENT_ID: "agent-researcher"
-      AGENT_DESCRIPTION: "${AGENT_RESEARCHER_DESCRIPTION:-A research assistant: answers questions and coordinates teammates.}"
-      AGENT_CAPABILITIES: "chat,research,clock"
-      ROSTER_REFRESH_MS: "${ROSTER_REFRESH_MS:-60000}"
-      REDIS_URL: "redis://redis:6379"
-      REDIS_USERNAME: "agent-researcher"
-      REDIS_PASSWORD: "${AGENT_RESEARCHER_PASSWORD}"
-      S3_ENDPOINT: "${S3_ENDPOINT}"
-      S3_BUCKET: "${S3_BUCKET:-orchestra}"
-      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-orchestra}"
-      S3_SECRET_KEY: "${S3_SECRET_KEY:-orchestra}"
-      # Model: faux by default (token-free). Set ANTHROPIC_API_KEY or an OpenAI-compatible
-      # endpoint for a real model (see .env.prod.example).
-      AGENT_FAUX: "${AGENT_FAUX:-1}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
-      OPENAI_MODEL: "${OPENAI_MODEL:-}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
-      MAX_RUN_MS: "${MAX_RUN_MS:-0}"
-    depends_on:
-      redis: { condition: service_healthy }
-    restart: unless-stopped
-
   web:
     image: "${ORCHESTRA_WEB_IMAGE:-paintezero/orchestra-web:latest}"
     environment:
       ORCHESTRATOR_UPSTREAM: "http://orchestrator:3001"
       GATEWAY_TOKEN: "${GATEWAY_TOKEN}"
     ports:
-      - "${WEB_PORT:-80}:80"
+      - "${TS_IP}:${WEB_PORT:-80}:80" # tailnet-only UI; front it publicly behind HTTPS (Caddy)
     depends_on:
       - orchestrator
     restart: unless-stopped
