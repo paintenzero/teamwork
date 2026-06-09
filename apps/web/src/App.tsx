@@ -38,6 +38,7 @@ export function App() {
   const sessionSock = useRef<WebSocket | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
   const pinnedRef = useRef(true); // is the user scrolled to the bottom? → follow new content
+  const openLatestRef = useRef(false); // next history load should jump to the agent's latest session
 
   // Roster: seed from GET, keep live via the presence socket.
   useEffect(() => {
@@ -84,7 +85,16 @@ export function App() {
     const q = selected ? `?agentId=${encodeURIComponent(selected)}` : "";
     api(`/api/sessions${q}`)
       .then((r) => r.json())
-      .then((list: SessionSummary[]) => setHistory(list))
+      .then((list: SessionSummary[]) => {
+        setHistory(list);
+        // On an agent switch, jump straight into its most recent session (sessions
+        // come back started_at DESC, so list[0] is the latest); blank chat if none.
+        if (openLatestRef.current) {
+          openLatestRef.current = false;
+          if (list[0]) openPast(list[0].id);
+          else newChat();
+        }
+      })
       .catch(() => {});
   }
   useEffect(loadHistory, [selected]);
@@ -263,8 +273,9 @@ export function App() {
                 name="agent"
                 checked={selected === a.id}
                 onChange={() => {
+                  if (a.id === selected) return;
+                  openLatestRef.current = true; // loadHistory will open its latest session
                   setSelected(a.id);
-                  newChat(); // a new agent means a new conversation
                 }}
               />
               <span className={`dot ${a.status}`} />
@@ -286,7 +297,7 @@ export function App() {
               <button className="session-open" onClick={() => openPast(s.id)}>
                 <span className={`dot ${s.status === "open" ? "idle" : "offline"}`} />
                 <span className="sid-short" title={s.id}>
-                  {s.title || `${s.id.slice(0, 8)}…`}
+                  {s.title || `…${s.id.slice(-6)}`}
                 </span>
                 <span className="when">{new Date(s.startedAt).toLocaleTimeString()}</span>
               </button>
@@ -313,7 +324,7 @@ export function App() {
                 <span className={`dot ${status.status}`} /> {status.status}
               </span>
             )}
-            {sessionId && <span className="sid">session {sessionId.slice(0, 8)}…</span>}
+            {sessionId && <span className="sid">session …{sessionId.slice(-6)}</span>}
           </div>
 
           <div className="trace" ref={traceRef} onScroll={onTraceScroll}>
@@ -498,7 +509,7 @@ function TreeNodes({
           >
             <div className="k">DELEGATE</div>
             <div className="agent-name">{c.agentId}</div>
-            <div className="sid-short">{c.id.slice(0, 8)}…</div>
+            <div className="sid-short">…{c.id.slice(-6)}</div>
           </button>
           <TreeNodes rootId={c.id} all={all} current={current} onOpen={onOpen} depth={depth + 1} />
         </div>
