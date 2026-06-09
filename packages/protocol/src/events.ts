@@ -54,16 +54,25 @@ export type PresenceEvent =
 
 /**
  * Session lifecycle announcement (pub/sub, like presence). The initiator that
- * allocates a `sessionId` announces it so a recorder can open a Postgres row and
- * start tailing the session's observability stream. Pub/sub is fire-and-forget;
- * the recorder also resumes still-open sessions from Postgres on startup, so a
- * missed announcement is recoverable.
+ * allocates a `sessionId` announces it (`open`) so a recorder can open a Postgres
+ * row and start tailing the session's observability stream. A `rename` carries a
+ * human-set display name through to the recorder (the only Postgres writer).
+ * Pub/sub is fire-and-forget; the recorder also resumes still-open sessions from
+ * Postgres on startup, so a missed `open` is recoverable.
  */
-export type SessionEvent = {
-  event: "open";
-  sessionId: string;
-  agentId: string;
-  parentSessionId?: string;
-  source: string;
-  ts: number;
-};
+export type SessionEvent =
+  | {
+      event: "open";
+      sessionId: string;
+      agentId: string;
+      parentSessionId?: string;
+      source: string;
+      ts: number;
+    }
+  | {
+      event: "rename";
+      sessionId: string;
+      title: string;
+      source: string;
+      ts: number;
+    };

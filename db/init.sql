@@ -15,11 +15,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   agent_id           TEXT REFERENCES agents(id),
   parent_session_id  UUID REFERENCES sessions(id), -- delegation tree
   status             TEXT NOT NULL DEFAULT 'open',
+  title              TEXT,                       -- human-set display name (optional)
   summary            TEXT,
   trace_uri          TEXT,                       -- S3 JSONL archive of full trace
   started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at           TIMESTAMPTZ
 );
+-- Self-heal an older volume created before `title` existed (CREATE IF NOT EXISTS
+-- above won't add columns to a pre-existing table).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title TEXT;
 CREATE INDEX IF NOT EXISTS sessions_parent_idx ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS sessions_agent_idx  ON sessions(agent_id);
 

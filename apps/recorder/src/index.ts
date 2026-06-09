@@ -114,8 +114,11 @@ async function archiveTrace(sessionId: string): Promise<void> {
 }
 
 async function onSession(ev: SessionEvent): Promise<void> {
-  if (ev.event !== "open") return;
   try {
+    if (ev.event === "rename") {
+      await store.renameSession(ev.sessionId, ev.title);
+      return;
+    }
     await store.ensureAgent(ev.agentId); // satisfy sessions.agent_id FK
     await store.insertSession({
       id: ev.sessionId,
@@ -124,7 +127,7 @@ async function onSession(ev: SessionEvent): Promise<void> {
     });
     tail(ev.sessionId, ev.agentId);
   } catch (err) {
-    console.error("[recorder] session open failed:", err);
+    console.error(`[recorder] session ${ev.event} failed:`, err);
   }
 }
 

@@ -161,23 +161,48 @@ body {
 .agent .dot { grid-row: 1 / span 2; }
 
 .session-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border-left: 2px solid transparent;
+  color: var(--on-surface);
+}
+.session-item:hover { background: rgba(45, 52, 73, 0.3); }
+.session-item.sel { background: rgba(34, 42, 61, 0.5); border-left-color: var(--primary); }
+.session-open {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: none;
   border: 0;
-  border-left: 2px solid transparent;
-  padding: 6px 16px;
-  color: var(--on-surface);
+  padding: 6px 8px 6px 16px;
+  color: inherit;
   font: inherit;
   cursor: pointer;
 }
-.session-item:hover { background: rgba(45, 52, 73, 0.3); }
-.session-item.sel { background: rgba(34, 42, 61, 0.5); border-left-color: var(--primary); }
-.session-item .sid-short { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.session-rename {
+  background: none;
+  border: 0;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  padding: 6px 12px 6px 4px;
+  opacity: 0;
+  font-size: 12px;
+}
+.session-item:hover .session-rename { opacity: 0.6; }
+.session-rename:hover { opacity: 1 !important; color: var(--on-surface); }
+.session-item .sid-short {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-item .when {
   color: var(--on-surface-variant);
   font-family: var(--font-mono);

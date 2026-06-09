@@ -11,6 +11,7 @@
  *   GET  /api/artifacts?uri=                   artifact download proxy (S3 → browser, no creds)
  *   POST /api/sessions                        { agentId, text } -> { sessionId }; opens a chat
  *   POST /api/sessions/:sessionId/messages    { text } -> {}     ; next chat turn (prompt or steer)
+ *   POST /api/sessions/:sessionId/rename      { title } -> {}    ; set a human display name
  *   POST /api/sessions/:sessionId/cancel      {} -> {}           ; hard stop the run
  *   POST /api/runs                            { agentId, prompt } -> { sessionId }; non-interactive kickoff
  *   WS   /api/sessions/:sessionId/stream      forwards the session's ObservabilityEvents (from start)
@@ -245,6 +246,21 @@ app.post("/api/sessions/:sessionId/messages", async (req, reply) => {
   const agentId = await resolveAgent(sessionId);
   if (!agentId) return reply.code(404).send({ error: "unknown session" });
   await bus.publishControl(agentId, { type: "user_message", text }, { sessionId });
+  return reply.send({});
+});
+
+// Rename a session by hand: announce a rename on the bus so the recorder (the
+// only Postgres writer) updates the title. Empty title clears it.
+app.post("/api/sessions/:sessionId/rename", async (req, reply) => {
+  const { sessionId } = req.params as { sessionId: string };
+  const { title } = req.body as { title?: string };
+  await bus.announceSession({
+    event: "rename",
+    sessionId,
+    title: (title ?? "").trim(),
+    source: "orchestrator",
+    ts: Date.now(),
+  });
   return reply.send({});
 });
 

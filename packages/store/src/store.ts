@@ -8,6 +8,7 @@ export interface SessionRow {
   agentId: string;
   parentSessionId: string | null;
   status: string;
+  title: string | null;
   summary: string | null;
   traceUri: string | null;
   startedAt: string;
@@ -19,6 +20,7 @@ interface RawSessionRow {
   agent_id: string;
   parent_session_id: string | null;
   status: string;
+  title: string | null;
   summary: string | null;
   trace_uri: string | null;
   started_at: Date;
@@ -30,6 +32,7 @@ const toSessionRow = (r: RawSessionRow): SessionRow => ({
   agentId: r.agent_id,
   parentSessionId: r.parent_session_id,
   status: r.status,
+  title: r.title,
   summary: r.summary,
   traceUri: r.trace_uri,
   startedAt: r.started_at.toISOString(),
@@ -37,7 +40,7 @@ const toSessionRow = (r: RawSessionRow): SessionRow => ({
 });
 
 const SESSION_COLS =
-  "id, agent_id, parent_session_id, status, summary, trace_uri, started_at, ended_at";
+  "id, agent_id, parent_session_id, status, title, summary, trace_uri, started_at, ended_at";
 
 /** A persisted artifact row, shaped for callers (camelCase). */
 export interface ArtifactRow {
@@ -131,6 +134,14 @@ export class Store {
        VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
       [s.id, s.agentId, s.parentSessionId ?? null],
     );
+  }
+
+  /** Set a session's human-given display name (empty string clears it). */
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.pool.query(`UPDATE sessions SET title = $2 WHERE id = $1`, [
+      sessionId,
+      title || null,
+    ]);
   }
 
   /** Point a session at its latest S3 trace archive. */

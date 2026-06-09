@@ -14,6 +14,7 @@ interface SessionSummary {
   agentId: string;
   parentSessionId: string | null;
   status: string;
+  title: string | null;
   traceUri: string | null;
   startedAt: string;
 }
@@ -207,6 +208,18 @@ export function App() {
     await api(`/api/sessions/${sessionId}/cancel`, { method: "POST" });
   }
 
+  // Rename a past session by hand. The recorder persists it; reload to reflect.
+  async function renameSession(s: SessionSummary) {
+    const title = window.prompt("Session name", s.title ?? "");
+    if (title === null) return; // cancelled
+    await api(`/api/sessions/${s.id}/rename`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: title.trim() }),
+    });
+    setTimeout(loadHistory, 300); // let the recorder write, then refresh
+  }
+
   // Begin a fresh conversation with the selected agent.
   function newChat() {
     sessionSock.current?.close();
@@ -259,15 +272,22 @@ export function App() {
           </div>
           {history.length === 0 && <p className="muted">no past sessions</p>}
           {history.map((s) => (
-            <button
-              key={s.id}
-              className={`session-item ${sessionId === s.id ? "sel" : ""}`}
-              onClick={() => openPast(s.id)}
-            >
-              <span className={`dot ${s.status === "open" ? "idle" : "offline"}`} />
-              <span className="sid-short">{s.id.slice(0, 8)}…</span>
-              <span className="when">{new Date(s.startedAt).toLocaleTimeString()}</span>
-            </button>
+            <div key={s.id} className={`session-item ${sessionId === s.id ? "sel" : ""}`}>
+              <button className="session-open" onClick={() => openPast(s.id)}>
+                <span className={`dot ${s.status === "open" ? "idle" : "offline"}`} />
+                <span className="sid-short" title={s.id}>
+                  {s.title || `${s.id.slice(0, 8)}…`}
+                </span>
+                <span className="when">{new Date(s.startedAt).toLocaleTimeString()}</span>
+              </button>
+              <button
+                className="session-rename"
+                title="rename"
+                onClick={() => void renameSession(s)}
+              >
+                ✎
+              </button>
+            </div>
           ))}
         </aside>
 
