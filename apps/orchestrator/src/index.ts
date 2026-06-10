@@ -156,8 +156,32 @@ app.get("/api/sessions", async (req) => {
   return await store.listSessions({ agentId });
 });
 
-// A past session's transcript: prefer the durable S3 archive, fall back to the
-// live Redis stream (e.g. a session not yet archived, or one Redis still holds).
+// The canonical session record: the pi AgentMessage[] the LLM actually receives —
+// the same array the transcript should render so operator and model never disagree.
+// Hot sessions read the agent's live Redis snapshot; archived ones read the S3 copy
+// the recorder wrote on each idle. `messages: null` (pre-migration session with
+// neither) tells the UI to fall back to the event-folded transcript.
+app.get("/api/sessions/:sessionId/context", async (req) => {
+  const { sessionId } = req.params as { sessionId: string };
+  const session = await store.getSession(sessionId);
+  if (session) {
+    if (session.status === "open") {
+      const hot = await bus.loadTaskContextOf(session.agentId, sessionId);
+      if (hot) return { session, messages: hot };
+    }
+    if (session.contextUri) {
+      try {
+        return { session, messages: await archive.getContext(session.contextUri) };
+      } catch {
+        /* fall through to null */
+      }
+    }
+  }
+  return { session: session ?? null, messages: null };
+});
+
+// A past session's raw event trace (debug view): prefer the durable S3 archive,
+// fall back to the live Redis stream (e.g. a session not yet archived).
 app.get("/api/sessions/:sessionId/transcript", async (req) => {
   const { sessionId } = req.params as { sessionId: string };
   const session = await store.getSession(sessionId);
@@ -229,21 +253,26 @@ app.post("/api/sessions", async (req, reply) => {
   return reply.send({ sessionId });
 });
 
-// Resolve a session's agent, falling back to Postgres so routing survives an
-// orchestrator restart (the in-memory map is just a cache of the recorder's spine).
-async function resolveAgent(sessionId: string): Promise<string | undefined> {
-  const cached = sessionAgent.get(sessionId);
-  if (cached) return cached;
+// Resolve a session's agent and lifecycle. The agent id is cached in memory (and
+// falls back to the cache for sessions the recorder hasn't written yet), but the
+// archived flag always comes from Postgres — a session can be flipped read-only
+// underneath us, so the cache can't be trusted for status.
+async function resolveSession(
+  sessionId: string,
+): Promise<{ agentId?: string; archived: boolean }> {
   const s = await store.getSession(sessionId);
   if (s) sessionAgent.set(sessionId, s.agentId);
-  return s?.agentId;
+  return { agentId: s?.agentId ?? sessionAgent.get(sessionId), archived: s?.status === "archived" };
 }
 
 // Continue a chat: route to the session's agent, which decides prompt-vs-steer.
+// An archived session is strictly read-only — its hot context expired from Redis,
+// so a new turn would silently start with amnesia; refuse it instead.
 app.post("/api/sessions/:sessionId/messages", async (req, reply) => {
   const { sessionId } = req.params as { sessionId: string };
   const { text } = req.body as { text: string };
-  const agentId = await resolveAgent(sessionId);
+  const { agentId, archived } = await resolveSession(sessionId);
+  if (archived) return reply.code(410).send({ error: "session archived (read-only)" });
   if (!agentId) return reply.code(404).send({ error: "unknown session" });
   await bus.publishControl(agentId, { type: "user_message", text }, { sessionId });
   return reply.send({});
@@ -267,7 +296,8 @@ app.post("/api/sessions/:sessionId/rename", async (req, reply) => {
 // Hard stop a running agent on this session.
 app.post("/api/sessions/:sessionId/cancel", async (req, reply) => {
   const { sessionId } = req.params as { sessionId: string };
-  const agentId = await resolveAgent(sessionId);
+  const { agentId, archived } = await resolveSession(sessionId);
+  if (archived) return reply.code(410).send({ error: "session archived (read-only)" });
   if (!agentId) return reply.code(404).send({ error: "unknown session" });
   await bus.publishControl(agentId, { type: "cancel" }, { sessionId });
   return reply.send({});

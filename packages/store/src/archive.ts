@@ -89,6 +89,31 @@ export class TraceArchive {
       .map((l) => JSON.parse(l) as unknown);
   }
 
+  /**
+   * Archive a session's canonical context — the pi AgentMessage[] the LLM
+   * receives — as one JSON object (`contexts/<sessionId>.json`). Re-archiving a
+   * growing session overwrites (the array grows monotonically, last write wins).
+   */
+  async putContext(sessionId: string, messages: unknown[]): Promise<string> {
+    const key = `contexts/${sessionId}.json`;
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: JSON.stringify(messages),
+        ContentType: "application/json",
+      }),
+    );
+    return `s3://${this.bucket}/${key}`;
+  }
+
+  /** Read a canonical context back from its `s3://bucket/key` uri. */
+  async getContext(uri: string): Promise<unknown[]> {
+    const { bucket, key } = parseS3Uri(uri);
+    const res = await this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    return JSON.parse(await res.Body!.transformToString()) as unknown[];
+  }
+
   close(): void {
     this.s3.destroy();
   }

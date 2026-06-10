@@ -61,6 +61,12 @@ control/presence and a full chat run work end-to-end.
   routing provider keys through a proxy with short-lived per-agent tokens so a
   compromised agent never holds a long-lived key. That is a separate service and is
   deferred; today agents read their key from env.
+- **A2A turns on an expired (archived) session are not gated.** The gateway returns
+  `410` for human chat on an archived session (its hot `taskctx:*` snapshot expired
+  with `SESSION_TTL_MS`), but a peer's `continue_task` bypasses the gateway — agents
+  don't read Postgres — so the receiving agent would silently start that task with a
+  fresh context. Delegation tasks live well inside the 7-day hot window in practice;
+  an agent-side guard would need session status on the bus.
 
 ## Rest of Phase 6 (shipped)
 

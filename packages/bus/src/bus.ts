@@ -32,7 +32,7 @@ const DEDUPE_TTL_MS = Number(process.env.DEDUPE_TTL_MS ?? 86_400_000); // 24h id
 const RECLAIM_IDLE_MS = Number(process.env.RECLAIM_IDLE_MS ?? 30_000); // reclaim pending idle this long
 const RECLAIM_EVERY_MS = Number(process.env.RECLAIM_EVERY_MS ?? 10_000); // how often to sweep for stuck requests
 const MAX_DELIVERIES = Number(process.env.MAX_DELIVERIES ?? 5); // attempts before dead-lettering
-const TASK_CONTEXT_TTL_MS = Number(process.env.TASK_CONTEXT_TTL_MS ?? 30 * 86_400_000); // task snapshot retention (resume window)
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS ?? 7 * 86_400_000); // hot-session window: task snapshot retention in Redis (resume window)
 
 // ioredis returns XREAD/XREADGROUP results as [stream, [[id, [f, v, ...]], ...]][]
 type StreamReply = Array<[string, Array<[string, string[]]>]>;
@@ -233,13 +233,22 @@ export class Bus {
       channels.taskContext(this.clientId, taskId),
       JSON.stringify(messages),
       "PX",
-      TASK_CONTEXT_TTL_MS,
+      SESSION_TTL_MS,
     );
   }
 
   /** Load a previously snapshotted task working memory, or undefined if none. */
-  async loadTaskContext(taskId: string): Promise<unknown[] | undefined> {
-    const raw = await this.redis.get(channels.taskContext(this.clientId, taskId));
+  loadTaskContext(taskId: string): Promise<unknown[] | undefined> {
+    return this.loadTaskContextOf(this.clientId, taskId);
+  }
+
+  /**
+   * Load another client's task snapshot (e.g. the orchestrator reading an agent's
+   * canonical session context to serve the UI). Requires an ACL role that can read
+   * `taskctx:*` (orchestrator/recorder/dev — per-agent users only see their own).
+   */
+  async loadTaskContextOf(clientId: string, taskId: string): Promise<unknown[] | undefined> {
+    const raw = await this.redis.get(channels.taskContext(clientId, taskId));
     if (!raw) return undefined;
     return safeJson<unknown[]>(raw);
   }

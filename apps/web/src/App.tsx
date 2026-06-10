@@ -5,7 +5,7 @@ import type {
   ObservabilityEvent,
   PresenceEvent,
 } from "@paintenzero/orchestra-protocol";
-import { foldEvents, type ContentBlock, type TraceEntry } from "./trace.js";
+import { foldEvents, foldMessages, type ContentBlock, type TraceEntry } from "./trace.js";
 import { api, apiUrl, wsUrl } from "./api.js";
 
 /** A durable session as returned by GET /api/sessions (recorder's spine). */
@@ -30,7 +30,14 @@ export function App() {
   const [agents, setAgents] = useState<AgentRegistration[]>([]);
   const [selected, setSelected] = useState<string | undefined>();
   const [sessionId, setSessionId] = useState<string | undefined>();
+  // The transcript has two layers: `seedEntries` is the settled part, folded from
+  // the canonical AgentMessage[] (what the LLM receives); `events` animates only
+  // the in-flight turn. Each `agent_end` carries the fresh canonical array, so the
+  // event layer collapses into the seed at every turn boundary — live and history
+  // render the same record.
+  const [seedEntries, setSeedEntries] = useState<TraceEntry[]>([]);
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
+  const [archived, setArchived] = useState(false); // session is read-only (hot context expired)
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [tree, setTree] = useState<SessionSummary[]>([]); // delegation tree of the open session
   const [input, setInput] = useState("");
@@ -113,22 +120,42 @@ export function App() {
     sessionSock.current = null;
   }
 
-  // Open (or reopen) a LIVE session stream — replays from start, then tails.
-  // WS6: on an unexpected drop, reconnect and replay (the page stays put — no full
-  // reload). The server stream is from-start and foldEvents is idempotent, so the
-  // rebuilt transcript matches.
+  // Shared live handler: animate the in-flight turn from events; at each turn
+  // boundary `agent_end` hands us that run's canonical AgentMessage[] (the run's
+  // user prompt + everything the model produced) — fold it onto the seed and drop
+  // the event layer, so the settled transcript is always exactly what the LLM
+  // receives.
+  function makeOnMessage(): (m: MessageEvent) => void {
+    let acc: ObservabilityEvent[] = [];
+    return (m) => {
+      const ev = JSON.parse(m.data) as ObservabilityEvent;
+      if (ev.type === "agent_end") {
+        setSeedEntries((prev) => [...prev, ...foldMessages(ev.messages)]);
+        acc = [];
+        setEvents([]);
+      } else {
+        acc.push(ev);
+        setEvents([...acc]);
+      }
+    };
+  }
+
+  // Open a LIVE session stream (a chat just created by send) — replays from
+  // start, then tails. WS6: on an unexpected drop, reconnect and replay (the page
+  // stays put — no full reload). The replay collapses into the canonical seed at
+  // each agent_end, so the rebuilt transcript matches.
   function openSession(sid: string) {
     closeSession();
+    setSeedEntries([]);
     setEvents([]);
+    setArchived(false);
     setSessionId(sid);
     location.hash = `session=${sid}`;
     const connect = () => {
+      setSeedEntries([]); // a from-start replay re-covers everything
+      setEvents([]);
       const ws = new WebSocket(wsUrl(`/api/sessions/${sid}/stream`));
-      const replay: ObservabilityEvent[] = [];
-      ws.onmessage = (m) => {
-        replay.push(JSON.parse(m.data) as ObservabilityEvent);
-        setEvents([...replay]);
-      };
+      ws.onmessage = makeOnMessage();
       ws.onclose = () => {
         // reconnect only if this is still the active live session
         if (sessionSock.current === ws) setTimeout(connect, 1000);
@@ -138,27 +165,41 @@ export function App() {
     connect();
   }
 
-  // Resume a PAST session: seed the transcript from the durable archive (S3 /
-  // Redis — survives a Redis flush), then tail new events live and let the user
-  // keep talking. The agent rehydrates that task's working memory from its Redis
-  // snapshot, so the conversation continues where it left off. Tailing from "now"
+  // Resume a PAST session: seed the transcript from the canonical session record
+  // (the AgentMessage[] the LLM receives — hot from Redis, else the S3 archive),
+  // then tail new events live and let the user keep talking. An `archived` session
+  // is read-only: render the seed, no socket, no input. Pre-migration sessions
+  // (no canonical record) fall back to the event transcript. Tailing from "now"
   // (the transcript is already seeded) avoids re-rendering the replay twice. On a
   // drop we re-seed + re-tail, so the rebuilt transcript stays correct.
   function openPast(sid: string) {
     closeSession();
+    setSeedEntries([]);
     setEvents([]);
+    setArchived(false);
     setSessionId(sid);
     location.hash = `session=${sid}&resume=1`;
     const connect = async () => {
-      const res = await api(`/api/sessions/${sid}/transcript`);
-      const { events: seed } = (await res.json()) as { events: ObservabilityEvent[] };
-      const acc = [...seed];
-      setEvents([...acc]);
-      const ws = new WebSocket(wsUrl(`/api/sessions/${sid}/stream?from=now`));
-      ws.onmessage = (m) => {
-        acc.push(JSON.parse(m.data) as ObservabilityEvent);
-        setEvents([...acc]);
+      const res = await api(`/api/sessions/${sid}/context`);
+      const { session, messages } = (await res.json()) as {
+        session: SessionSummary | null;
+        messages: unknown[] | null;
       };
+      const readOnly = session?.status === "archived";
+      setArchived(readOnly);
+      if (messages) {
+        setSeedEntries(foldMessages(messages));
+        setEvents([]);
+      } else {
+        // pre-migration fallback: the event transcript (S3 trace, else Redis)
+        const r = await api(`/api/sessions/${sid}/transcript`);
+        const { events: seed } = (await r.json()) as { events: ObservabilityEvent[] };
+        setSeedEntries(foldEvents(seed).entries);
+        setEvents([]);
+      }
+      if (readOnly) return; // nothing more will happen on this session
+      const ws = new WebSocket(wsUrl(`/api/sessions/${sid}/stream?from=now`));
+      ws.onmessage = makeOnMessage();
       ws.onclose = () => {
         if (sessionSock.current === ws) setTimeout(() => void connect(), 1000);
       };
@@ -176,7 +217,9 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { entries, status } = useMemo(() => foldEvents(events), [events]);
+  // Settled canonical seed + the in-flight turn's event layer = the transcript.
+  const { entries: liveEntries, status } = useMemo(() => foldEvents(events), [events]);
+  const entries = useMemo(() => [...seedEntries, ...liveEntries], [seedEntries, liveEntries]);
   const running = status?.status === "busy";
   const selectedAgent = agents.find((a) => a.id === selected);
 
@@ -210,13 +253,13 @@ export function App() {
     if (!pinnedRef.current) return;
     const el = traceRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events]);
+  }, [events, seedEntries]);
 
   // One input, two gestures: the first message opens a session, the rest continue
   // it. The agent decides prompt-vs-steer; here we only route.
   async function send() {
     const text = input.trim();
-    if (!text) return;
+    if (!text || archived) return;
     setInput("");
     if (!sessionId) {
       if (!selected) return;
@@ -257,7 +300,9 @@ export function App() {
   // Begin a fresh conversation with the selected agent.
   function newChat() {
     closeSession();
+    setSeedEntries([]);
     setEvents([]);
+    setArchived(false);
     setSessionId(undefined);
     location.hash = "";
   }
@@ -332,7 +377,12 @@ export function App() {
             </button>
             {selected && <span className="with mono-ui">chatting with {selected}</span>}
             <span className="spacer" />
-            {status && (
+            {archived && (
+              <span className="status offline">
+                <span className="dot offline" /> archived (read-only)
+              </span>
+            )}
+            {!archived && status && (
               <span className={`status ${status.status}`}>
                 <span className={`dot ${status.status}`} /> {status.status}
               </span>
@@ -363,13 +413,15 @@ export function App() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={
-                    !selected
-                      ? "no agent selected"
-                      : running
-                        ? "Steer the agent…"
-                        : "Send a command to the agent…"
+                    archived
+                      ? "session archived — read-only"
+                      : !selected
+                        ? "no agent selected"
+                        : running
+                          ? "Steer the agent…"
+                          : "Send a command to the agent…"
                   }
-                  disabled={!selected}
+                  disabled={!selected || archived}
                 />
               </div>
               <div className="composer-row">
@@ -392,7 +444,7 @@ export function App() {
                     <button
                       type="submit"
                       className="btn send"
-                      disabled={!selected || !input.trim()}
+                      disabled={!selected || !input.trim() || archived}
                     >
                       <Icon name="send" className="sm" /> Send
                     </button>

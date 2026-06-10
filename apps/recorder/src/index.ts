@@ -28,6 +28,12 @@ const bus = new Bus({ clientId: "recorder" });
 const store = new Store();
 const archive = new TraceArchive();
 
+/** Hot-session window: must match the bus's Redis snapshot TTL so the read-only
+ *  mark lands when (not before) the resumable context expires. */
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS ?? 7 * 86_400_000);
+/** How often to sweep open sessions for expiry. */
+const SESSION_SWEEP_MS = Number(process.env.SESSION_SWEEP_MS ?? 3_600_000);
+
 /** Concatenated text of the last assistant message in a pi conversation array. */
 function lastAssistantText(messages: unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -92,8 +98,12 @@ async function onEvent(
         });
         break;
       case "status":
-        // End of a run: snapshot the full trace to S3 and update the pointer.
-        if (ev.status === "idle") await archiveTrace(sessionId);
+        // End of a run: snapshot the full trace + the canonical context to S3 and
+        // update the pointers.
+        if (ev.status === "idle") {
+          await archiveTrace(sessionId);
+          await archiveContext(sessionId);
+        }
         break;
     }
   } catch (err) {
@@ -111,6 +121,22 @@ async function archiveTrace(sessionId: string): Promise<void> {
   const coalesced = envs.filter((e) => e.payload.type !== "message_update");
   const uri = await archive.putTrace(sessionId, coalesced);
   await store.setTrace(sessionId, uri);
+}
+
+/**
+ * Archive the canonical session record: the full pi AgentMessage[] the LLM
+ * receives. The source is the agent's own Redis snapshot (`taskctx:*`), written
+ * just *before* it publishes `status: idle` — i.e. literally the context the next
+ * turn restores — so history renders exactly what the model sees. (The `agent_end`
+ * event is not usable here: it carries only that run's new messages.) Re-archiving
+ * overwrites; the array grows monotonically, so last write wins.
+ */
+async function archiveContext(sessionId: string): Promise<void> {
+  const agentId = agentOf.get(sessionId);
+  if (!agentId) return;
+  const messages = await bus.loadTaskContextOf(agentId, sessionId);
+  if (!messages?.length) return;
+  await store.setContext(sessionId, await archive.putContext(sessionId, messages));
 }
 
 async function onSession(ev: SessionEvent): Promise<void> {
@@ -154,6 +180,25 @@ async function main() {
 
   // Resume: re-tail sessions left open by a previous run (replay catches up).
   for (const s of await store.listOpenSessions()) tail(s.id, s.agentId);
+
+  // Expiry sweep: sessions idle past the hot window flip to read-only `archived`
+  // (their Redis context snapshot shares the same TTL, so a "resume" would have
+  // started with amnesia — archiving makes the boundary explicit instead).
+  const sweep = async () => {
+    try {
+      const ids = await store.archiveExpiredSessions(SESSION_TTL_MS);
+      for (const id of ids) {
+        tails.get(id)?.();
+        tails.delete(id);
+        console.log(`[recorder] archived expired session ${id.slice(0, 8)}… (read-only)`);
+      }
+    } catch (err) {
+      console.error("[recorder] expiry sweep failed:", err);
+    }
+  };
+  await sweep();
+  const sweepTimer = setInterval(() => void sweep(), SESSION_SWEEP_MS);
+  sweepTimer.unref?.();
 
   console.log("[recorder] online — persisting agents, sessions, messages; archiving traces to S3.");
 

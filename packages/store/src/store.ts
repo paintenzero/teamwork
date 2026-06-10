@@ -11,6 +11,7 @@ export interface SessionRow {
   title: string | null;
   summary: string | null;
   traceUri: string | null;
+  contextUri: string | null;
   startedAt: string;
   endedAt: string | null;
 }
@@ -23,6 +24,7 @@ interface RawSessionRow {
   title: string | null;
   summary: string | null;
   trace_uri: string | null;
+  context_uri: string | null;
   started_at: Date;
   ended_at: Date | null;
 }
@@ -35,12 +37,13 @@ const toSessionRow = (r: RawSessionRow): SessionRow => ({
   title: r.title,
   summary: r.summary,
   traceUri: r.trace_uri,
+  contextUri: r.context_uri,
   startedAt: r.started_at.toISOString(),
   endedAt: r.ended_at ? r.ended_at.toISOString() : null,
 });
 
 const SESSION_COLS =
-  "id, agent_id, parent_session_id, status, title, summary, trace_uri, started_at, ended_at";
+  "id, agent_id, parent_session_id, status, title, summary, trace_uri, context_uri, started_at, ended_at";
 
 /** A persisted artifact row, shaped for callers (camelCase). */
 export interface ArtifactRow {
@@ -147,6 +150,32 @@ export class Store {
   /** Point a session at its latest S3 trace archive. */
   async setTrace(sessionId: string, uri: string): Promise<void> {
     await this.pool.query(`UPDATE sessions SET trace_uri = $2 WHERE id = $1`, [sessionId, uri]);
+  }
+
+  /** Point a session at its latest S3 canonical-context archive. */
+  async setContext(sessionId: string, uri: string): Promise<void> {
+    await this.pool.query(`UPDATE sessions SET context_uri = $2 WHERE id = $1`, [sessionId, uri]);
+  }
+
+  /**
+   * Flip open sessions idle longer than `ttlMs` to read-only `archived` (their hot
+   * Redis context has the same TTL, so by now it has expired). Last activity is the
+   * newest message, falling back to started_at for sessions that never got one.
+   * Returns the archived session ids (for logging).
+   */
+  async archiveExpiredSessions(ttlMs: number): Promise<string[]> {
+    const r = await this.pool.query<{ id: string }>(
+      `UPDATE sessions s
+          SET status = 'archived', ended_at = now()
+        WHERE s.status = 'open'
+          AND GREATEST(
+                s.started_at,
+                COALESCE((SELECT max(m.created_at) FROM messages m WHERE m.session_id = s.id), s.started_at)
+              ) < now() - make_interval(secs => $1)
+        RETURNING id`,
+      [ttlMs / 1000],
+    );
+    return r.rows.map((x) => x.id);
   }
 
   /** Sessions still open — re-tailed on recorder startup to catch missed turns. */

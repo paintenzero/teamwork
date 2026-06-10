@@ -18,6 +18,67 @@ function contentOf(message: unknown): ContentBlock[] {
   return Array.isArray(content) ? (content as ContentBlock[]) : [];
 }
 
+/** Concatenated text blocks of a pi message content array (or a bare string). */
+function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c): c is { type: "text"; text: string } => (c as { type?: string })?.type === "text")
+    .map((c) => c.text)
+    .join("\n");
+}
+
+/**
+ * Fold the canonical pi `AgentMessage[]` — exactly what the LLM receives — into
+ * the same trace rows `foldEvents` produces, so the settled transcript renders the
+ * model's true view in both live and history. Assistant tool calls become their own
+ * rows; the matching `toolResult` message fills in the result; a `save_artifact`
+ * result also yields an artifact card (its `details` carry the ArtifactRef).
+ */
+export function foldMessages(messages: unknown[]): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  for (const raw of messages) {
+    const m = raw as {
+      role?: string;
+      content?: unknown;
+      toolCallId?: string;
+      toolName?: string;
+      isError?: boolean;
+      details?: { uri?: string; contentType?: string; name?: string };
+    };
+    if (m.role === "user") {
+      entries.push({ kind: "user", text: textOf(m.content), from: "user" });
+    } else if (m.role === "assistant") {
+      const content = contentOf(m);
+      entries.push({ kind: "assistant", content });
+      for (const c of content) {
+        if (c.type === "toolCall") {
+          const id = (c as { id?: string }).id ?? "";
+          entries.push({ kind: "tool", toolCallId: id, toolName: c.name, args: c.arguments });
+        }
+      }
+    } else if (m.role === "toolResult") {
+      const t = entries.find(
+        (e): e is Extract<TraceEntry, { kind: "tool" }> =>
+          e.kind === "tool" && e.toolCallId === m.toolCallId,
+      );
+      if (t) {
+        t.result = textOf(m.content);
+        t.isError = m.isError;
+      }
+      if (m.toolName === "save_artifact" && m.details?.uri) {
+        entries.push({
+          kind: "artifact",
+          uri: m.details.uri,
+          contentType: m.details.contentType,
+          name: m.details.name,
+        });
+      }
+    }
+  }
+  return entries;
+}
+
 /**
  * Fold the ordered ObservabilityEvent stream into a list of trace rows plus the
  * latest agent status. Assistant text/thinking come from the reconstructed
