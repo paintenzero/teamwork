@@ -99,12 +99,26 @@ export function App() {
   }
   useEffect(loadHistory, [selected]);
 
+  // Tear down the current session socket. Detach its handlers *before* closing so
+  // an in-flight message from the old (still-running) session can't fire its
+  // onmessage and clobber the transcript we're about to open — close() is async,
+  // so without this a late event from the previous stream replaces the new chat
+  // log. Also stops the onclose reconnect from resurrecting a deliberate close.
+  function closeSession() {
+    const ws = sessionSock.current;
+    if (!ws) return;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.close();
+    sessionSock.current = null;
+  }
+
   // Open (or reopen) a LIVE session stream — replays from start, then tails.
   // WS6: on an unexpected drop, reconnect and replay (the page stays put — no full
   // reload). The server stream is from-start and foldEvents is idempotent, so the
   // rebuilt transcript matches.
   function openSession(sid: string) {
-    sessionSock.current?.close();
+    closeSession();
     setEvents([]);
     setSessionId(sid);
     location.hash = `session=${sid}`;
@@ -131,7 +145,7 @@ export function App() {
   // (the transcript is already seeded) avoids re-rendering the replay twice. On a
   // drop we re-seed + re-tail, so the rebuilt transcript stays correct.
   function openPast(sid: string) {
-    sessionSock.current?.close();
+    closeSession();
     setEvents([]);
     setSessionId(sid);
     location.hash = `session=${sid}&resume=1`;
@@ -242,8 +256,7 @@ export function App() {
 
   // Begin a fresh conversation with the selected agent.
   function newChat() {
-    sessionSock.current?.close();
-    sessionSock.current = null;
+    closeSession();
     setEvents([]);
     setSessionId(undefined);
     location.hash = "";
